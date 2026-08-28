@@ -5,8 +5,19 @@ from collections.abc import Sequence
 from importlib.metadata import version
 
 from qb_forecast_rating.data.pbp import ingest_pbp
+from qb_forecast_rating.data.qb_actions import process_qb_actions
 
 DISTRIBUTION_NAME = "qb-forecast-rating"
+
+
+def add_season_argument(parser: ArgumentParser) -> None:
+    """Add the shared required season option to a command parser."""
+    parser.add_argument(
+        "--season",
+        type=int,
+        required=True,
+        help="NFL season to process, such as 2024.",
+    )
 
 
 def build_parser() -> ArgumentParser:
@@ -22,16 +33,18 @@ def build_parser() -> ArgumentParser:
     )
 
     subparsers = parser.add_subparsers(dest="command")
+
     ingest_parser = subparsers.add_parser(
         "ingest-pbp",
         help="Download and persist one season of play-by-play data.",
     )
-    ingest_parser.add_argument(
-        "--season",
-        type=int,
-        required=True,
-        help="NFL season to download, such as 2024.",
+    add_season_argument(ingest_parser)
+
+    actions_parser = subparsers.add_parser(
+        "build-qb-actions",
+        help="Build the processed quarterback dropback table.",
     )
+    add_season_argument(actions_parser)
 
     return parser
 
@@ -45,6 +58,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         season = int(args.season)
         output_path = ingest_pbp(season)
         print(f"Saved {season} play-by-play data to {output_path}")
+        return 0
+
+    if args.command == "build-qb-actions":
+        season = int(args.season)
+        output_path = process_qb_actions(season)
+        print(f"Saved {season} QB actions to {output_path}")
         return 0
 
     parser.print_help()
