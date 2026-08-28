@@ -7,7 +7,10 @@ authors = [
     { name = "Jimmy Mullen" }
 ]
 requires-python = ">=3.13,<3.14"
-dependencies = []
+dependencies = [
+    "nflreadpy>=0.1.5",
+    "polars>=1.44.1",
+]
 
 [project.scripts]
 qb-forecast-rating = "qb_forecast_rating.cli:main"
@@ -49,3 +52,7 @@ select = ["E", "F", "I", "B", "C4", "UP"]
 python_version = "3.13"
 mypy_path = "src"
 strict = true
+
+[[tool.mypy.overrides]]
+module = ["nflreadpy", "nflreadpy.*"]
+ignore_missing_imports = true
