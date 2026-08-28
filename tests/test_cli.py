@@ -39,6 +39,7 @@ def test_main_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     assert "Forecast future NFL quarterback EPA per action." in captured.out
     assert "ingest-pbp" in captured.out
     assert "build-qb-actions" in captured.out
+    assert "build-qb-games" in captured.out
 
 
 def test_main_ingests_pbp(
@@ -87,4 +88,39 @@ def test_main_builds_qb_actions(
     assert exit_code == 0
     assert requested_seasons == [2024]
     assert "Saved 2024 QB actions" in captured.out
+    assert str(output_path) in captured.out
+
+
+def test_parser_accepts_build_qb_games_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["build-qb-games", "--season", "2024"])
+
+    assert args.command == "build-qb-games"
+    assert args.season == 2024
+
+
+def test_main_builds_qb_games(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "qb_games_2024.parquet"
+    requested_seasons: list[int] = []
+
+    def fake_process(season: int) -> Path:
+        requested_seasons.append(season)
+        return output_path
+
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.process_qb_games",
+        fake_process,
+    )
+
+    exit_code = main(["build-qb-games", "--season", "2024"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert requested_seasons == [2024]
+    assert "Saved 2024 QB game metrics" in captured.out
     assert str(output_path) in captured.out
