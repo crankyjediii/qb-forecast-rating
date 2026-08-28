@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from qb-forecast-rating!")
+"""QB Forecast Rating analytics package."""
