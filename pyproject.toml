@@ -1,0 +1,17 @@
+[project]
+name = "qb-forecast-rating"
+version = "0.1.0"
+description = "A reproducible, regression-based NFL quarterback rating designed to forecast future EPA per action."
+readme = "README.md"
+authors = [
+    { name = "Jimmy Mullen" }
+]
+requires-python = ">=3.13,<3.14"
+dependencies = []
+
+[project.scripts]
+qb-forecast-rating = "qb_forecast_rating:main"
+
+[build-system]
+requires = ["uv_build>=0.12.7,<0.13.0"]
+build-backend = "uv_build"
