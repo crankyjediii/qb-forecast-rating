@@ -6,6 +6,7 @@ from importlib.metadata import version
 
 from qb_forecast_rating.data.pbp import ingest_pbp
 from qb_forecast_rating.data.qb_actions import process_qb_actions
+from qb_forecast_rating.data.qb_games import process_qb_games
 
 DISTRIBUTION_NAME = "qb-forecast-rating"
 
@@ -44,6 +45,11 @@ def build_parser() -> ArgumentParser:
         "build-qb-actions",
         help="Build the processed quarterback dropback table.",
     )
+    games_parser = subparsers.add_parser(
+        "build-qb-games",
+        help="Build game-level quarterback metrics.",
+    )
+    add_season_argument(games_parser)
     add_season_argument(actions_parser)
 
     return parser
@@ -64,6 +70,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         season = int(args.season)
         output_path = process_qb_actions(season)
         print(f"Saved {season} QB actions to {output_path}")
+        return 0
+
+    if args.command == "build-qb-games":
+        season = int(args.season)
+        output_path = process_qb_games(season)
+        print(f"Saved {season} QB game metrics to {output_path}")
         return 0
 
     parser.print_help()
