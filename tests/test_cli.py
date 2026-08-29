@@ -12,6 +12,10 @@ from qb_forecast_rating.modeling.baseline import (
     BaselineRun,
     RegressionMetrics,
 )
+from qb_forecast_rating.modeling.benchmarks import (
+    BenchmarkEvaluation,
+    BenchmarkRun,
+)
 from qb_forecast_rating.modeling.inference import (
     CoefficientTest,
     InferenceEvaluation,
@@ -173,6 +177,76 @@ def test_main_builds_forecast_data(
     assert str(output_path) in captured.out
 
 
+def test_parser_accepts_ingest_player_stats_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["ingest-player-stats", "--season", "2024"])
+
+    assert args.command == "ingest-player-stats"
+    assert args.season == 2024
+
+
+def test_main_ingests_player_stats(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "player_stats_weekly_2024.parquet"
+    requested_seasons: list[int] = []
+
+    def fake_ingest(season: int) -> Path:
+        requested_seasons.append(season)
+        return output_path
+
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.ingest_player_stats",
+        fake_ingest,
+    )
+
+    exit_code = main(["ingest-player-stats", "--season", "2024"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert requested_seasons == [2024]
+    assert "Saved 2024 weekly player stats" in captured.out
+    assert str(output_path) in captured.out
+
+
+def test_parser_accepts_build_benchmark_data_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["build-benchmark-data", "--season", "2024"])
+
+    assert args.command == "build-benchmark-data"
+    assert args.season == 2024
+
+
+def test_main_builds_benchmark_data(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+) -> None:
+    output_path = tmp_path / "qb_benchmarks_2024.parquet"
+    requested_seasons: list[int] = []
+
+    def fake_process(season: int) -> Path:
+        requested_seasons.append(season)
+        return output_path
+
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.process_benchmark_dataset",
+        fake_process,
+    )
+
+    exit_code = main(["build-benchmark-data", "--season", "2024"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert requested_seasons == [2024]
+    assert "Saved 2024 benchmark data" in captured.out
+    assert str(output_path) in captured.out
+
+
 def test_parser_accepts_evaluate_baseline_command() -> None:
     parser = build_parser()
 
@@ -209,6 +283,24 @@ def test_main_evaluates_baseline(
     baseline_run = BaselineRun(
         model=LinearRegression(),
         evaluation=baseline_evaluation,
+    )
+    benchmark_evaluation = BenchmarkEvaluation(
+        name="passer_rating",
+        feature_column="prior_passer_rating",
+        train_rows=100,
+        test_rows=25,
+        train_end_week=13,
+        metrics=RegressionMetrics(
+            rmse=0.32,
+            mae=0.24,
+            r2=0.08,
+        ),
+        calibration_slope=0.0035,
+        calibration_intercept=-0.22,
+    )
+    benchmark_run = BenchmarkRun(
+        model=LinearRegression(),
+        evaluation=benchmark_evaluation,
     )
     inference_evaluation = InferenceEvaluation(
         train_rows=100,
@@ -248,6 +340,14 @@ def test_main_evaluates_baseline(
         fit_calls.append(("baseline", train_end_week))
         return baseline_run
 
+    def fake_fit_benchmark(
+        data: pl.DataFrame,
+        train_end_week: int,
+    ) -> BenchmarkRun:
+        assert data is source_data
+        fit_calls.append(("benchmark", train_end_week))
+        return benchmark_run
+
     def fake_fit_inference(
         data: pl.DataFrame,
         train_end_week: int,
@@ -263,6 +363,10 @@ def test_main_evaluates_baseline(
     monkeypatch.setattr(
         "qb_forecast_rating.cli.fit_baseline",
         fake_fit_baseline,
+    )
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.fit_passer_rating_benchmark",
+        fake_fit_benchmark,
     )
     monkeypatch.setattr(
         "qb_forecast_rating.cli.fit_inference",
@@ -281,11 +385,18 @@ def test_main_evaluates_baseline(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert requested_paths == [Path("data/features/qb_forecast_2024.parquet")]
-    assert fit_calls == [("baseline", 13), ("inference", 13)]
+    assert requested_paths == [Path("data/features/qb_benchmarks_2024.parquet")]
+    assert fit_calls == [
+        ("baseline", 13),
+        ("benchmark", 13),
+        ("inference", 13),
+    ]
     assert "Season: 2024" in captured.out
     assert "Predictive evaluation" in captured.out
     assert "linear_regression: RMSE=0.3000 MAE=0.2000 R2=0.1000" in captured.out
+    assert "Official passer-rating benchmark" in captured.out
+    assert "passer_rating: RMSE=0.3200 MAE=0.2400 R2=0.0800" in captured.out
+    assert "Calibration:" in captured.out
     assert "Statistical inference" in captured.out
     assert "QB clusters: 20" in captured.out
     assert "prior_sack_rate: estimate=-1.5000" in captured.out
