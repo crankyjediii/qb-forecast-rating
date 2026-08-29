@@ -23,9 +23,20 @@ from qb_forecast_rating.modeling.benchmarks import (
     BenchmarkEvaluation,
     fit_passer_rating_benchmark,
 )
+from qb_forecast_rating.modeling.comparison import (
+    DEFAULT_BOOTSTRAP_REPLICATES,
+    PairedForecastComparison,
+    compare_forecasts,
+)
 from qb_forecast_rating.modeling.inference import (
     InferenceEvaluation,
     fit_inference,
+)
+from qb_forecast_rating.modeling.validation import (
+    DEFAULT_FIRST_TEST_WEEK,
+    PREDICTION_COLUMNS,
+    WalkForwardResult,
+    walk_forward_validate,
 )
 
 DISTRIBUTION_NAME = "qb-forecast-rating"
@@ -100,6 +111,44 @@ def print_inference_evaluation(evaluation: InferenceEvaluation) -> None:
         )
 
 
+def print_walk_forward_result(result: WalkForwardResult) -> None:
+    """Print expanding-window out-of-sample metrics."""
+    print("Walk-forward validation")
+    print(f"Folds: {len(result.folds)}")
+    print(f"First test week: {result.folds[0].test_week}")
+    print(f"Last test week: {result.folds[-1].test_week}")
+    print(f"Out-of-sample rows: {result.predictions.height}")
+    print()
+
+    for name, metrics in result.metrics.items():
+        print(
+            f"{name}: RMSE={metrics.rmse:.4f} MAE={metrics.mae:.4f} R2={metrics.r2:.4f}"
+        )
+
+
+def print_forecast_comparison(
+    comparison: PairedForecastComparison,
+) -> None:
+    """Print paired bootstrap differences and uncertainty."""
+    print()
+    print("Regression minus passer rating")
+    print("Negative differences favor the regression.")
+    print(
+        f"RMSE difference: {comparison.rmse.difference:+.4f} "
+        f"95% CI=[{comparison.rmse.confidence_low:+.4f}, "
+        f"{comparison.rmse.confidence_high:+.4f}] "
+        f"P(regression wins)={comparison.rmse.candidate_win_probability:.3f}"
+    )
+    print(
+        f"MAE difference: {comparison.mae.difference:+.4f} "
+        f"95% CI=[{comparison.mae.confidence_low:+.4f}, "
+        f"{comparison.mae.confidence_high:+.4f}] "
+        f"P(regression wins)={comparison.mae.candidate_win_probability:.3f}"
+    )
+    print(f"QB clusters: {comparison.qb_clusters}")
+    print(f"Bootstrap replicates: {comparison.bootstrap_replicates}")
+
+
 def build_parser() -> ArgumentParser:
     """Create the command-line argument parser."""
     parser = ArgumentParser(
@@ -160,6 +209,24 @@ def build_parser() -> ArgumentParser:
         type=int,
         default=DEFAULT_TRAIN_END_WEEK,
         help="Last week included in model training (default: 14).",
+    )
+
+    validation_parser = subparsers.add_parser(
+        "validate-model",
+        help="Run expanding-window validation and paired comparison.",
+    )
+    add_season_argument(validation_parser)
+    validation_parser.add_argument(
+        "--first-test-week",
+        type=int,
+        default=DEFAULT_FIRST_TEST_WEEK,
+        help="First week evaluated out of sample (default: 6).",
+    )
+    validation_parser.add_argument(
+        "--bootstrap-replicates",
+        type=int,
+        default=DEFAULT_BOOTSTRAP_REPLICATES,
+        help="QB-cluster bootstrap replicates (default: 5000).",
     )
 
     return parser
@@ -224,6 +291,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         print_baseline_evaluation(baseline_run.evaluation)
         print_benchmark_evaluation(benchmark_run.evaluation)
         print_inference_evaluation(inference)
+        return 0
+
+    if args.command == "validate-model":
+        season = int(args.season)
+        first_test_week = int(args.first_test_week)
+        bootstrap_replicates = int(args.bootstrap_replicates)
+        input_path = benchmark_dataset_path(season)
+        data = pl.read_parquet(input_path)
+
+        validation = walk_forward_validate(
+            data,
+            first_test_week,
+        )
+        comparison = compare_forecasts(
+            predictions=validation.predictions,
+            candidate_column=PREDICTION_COLUMNS["linear_regression"],
+            reference_column=PREDICTION_COLUMNS["passer_rating"],
+            bootstrap_replicates=bootstrap_replicates,
+        )
+
+        print(f"Season: {season}")
+        print(f"Source: {input_path}")
+        print_walk_forward_result(validation)
+        print_forecast_comparison(comparison)
         return 0
 
     parser.print_help()
