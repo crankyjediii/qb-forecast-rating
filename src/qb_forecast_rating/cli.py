@@ -125,25 +125,34 @@ def print_walk_forward_result(result: WalkForwardResult) -> None:
             f"{name}: RMSE={metrics.rmse:.4f} MAE={metrics.mae:.4f} R2={metrics.r2:.4f}"
         )
 
+    alpha_counts: dict[float, int] = {}
+    for fold in result.folds:
+        alpha_counts[fold.ridge_alpha] = alpha_counts.get(fold.ridge_alpha, 0) + 1
+
+    print()
+    print("Selected ridge alphas")
+    for alpha, count in sorted(alpha_counts.items()):
+        print(f"{alpha:g}: {count} folds")
+
 
 def print_forecast_comparison(
     comparison: PairedForecastComparison,
 ) -> None:
     """Print paired bootstrap differences and uncertainty."""
     print()
-    print("Regression minus passer rating")
-    print("Negative differences favor the regression.")
+    print("Nested ridge minus passer rating")
+    print("Negative differences favor nested ridge.")
     print(
         f"RMSE difference: {comparison.rmse.difference:+.4f} "
         f"95% CI=[{comparison.rmse.confidence_low:+.4f}, "
         f"{comparison.rmse.confidence_high:+.4f}] "
-        f"P(regression wins)={comparison.rmse.candidate_win_probability:.3f}"
+        f"P(ridge wins)={comparison.rmse.candidate_win_probability:.3f}"
     )
     print(
         f"MAE difference: {comparison.mae.difference:+.4f} "
         f"95% CI=[{comparison.mae.confidence_low:+.4f}, "
         f"{comparison.mae.confidence_high:+.4f}] "
-        f"P(regression wins)={comparison.mae.candidate_win_probability:.3f}"
+        f"P(ridge wins)={comparison.mae.candidate_win_probability:.3f}"
     )
     print(f"QB clusters: {comparison.qb_clusters}")
     print(f"Bootstrap replicates: {comparison.bootstrap_replicates}")
@@ -306,7 +315,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         comparison = compare_forecasts(
             predictions=validation.predictions,
-            candidate_column=PREDICTION_COLUMNS["linear_regression"],
+            candidate_column=PREDICTION_COLUMNS["ridge_regression"],
             reference_column=PREDICTION_COLUMNS["passer_rating"],
             bootstrap_replicates=bootstrap_replicates,
         )

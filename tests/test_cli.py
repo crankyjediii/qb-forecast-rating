@@ -439,11 +439,15 @@ def test_main_validates_model(
                 test_week=8,
                 train_rows=136,
                 test_rows=31,
+                ridge_alpha=1.0,
+                ridge_inner_folds=3,
             ),
             WalkForwardFold(
                 test_week=9,
                 train_rows=167,
                 test_rows=30,
+                ridge_alpha=10.0,
+                ridge_inner_folds=4,
             ),
         ),
         predictions=prediction_data,
@@ -458,10 +462,15 @@ def test_main_validates_model(
                 mae=0.21,
                 r2=0.05,
             ),
+            "ridge_regression": RegressionMetrics(
+                rmse=0.27,
+                mae=0.20,
+                r2=0.07,
+            ),
         },
     )
     comparison = PairedForecastComparison(
-        candidate_column="linear_regression_prediction",
+        candidate_column="ridge_regression_prediction",
         reference_column="passer_rating_prediction",
         qb_clusters=40,
         bootstrap_replicates=100,
@@ -538,7 +547,7 @@ def test_main_validates_model(
     assert validation_calls == [8]
     assert comparison_calls == [
         (
-            "linear_regression_prediction",
+            "ridge_regression_prediction",
             "passer_rating_prediction",
             100,
         )
@@ -550,7 +559,11 @@ def test_main_validates_model(
     assert "Last test week: 9" in captured.out
     assert "Out-of-sample rows: 1" in captured.out
     assert "linear_regression: RMSE=0.2800" in captured.out
-    assert "Regression minus passer rating" in captured.out
+    assert "Nested ridge minus passer rating" in captured.out
     assert "RMSE difference: -0.0100" in captured.out
-    assert "P(regression wins)=0.800" in captured.out
+    assert "P(ridge wins)=0.800" in captured.out
     assert "Bootstrap replicates: 100" in captured.out
+    assert "Selected ridge alphas" in captured.out
+    assert "1: 1 folds" in captured.out
+    assert "10: 1 folds" in captured.out
+    assert "ridge_regression: RMSE=0.2700" in captured.out

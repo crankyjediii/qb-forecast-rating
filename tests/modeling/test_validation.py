@@ -18,7 +18,7 @@ def sample_validation_data() -> pl.DataFrame:
     rows: list[dict[str, object]] = []
 
     for week in range(2, 9):
-        for qb_number in range(2):
+        for qb_number in range(16):
             prior_epa = 0.02 * week + 0.01 * qb_number
             prior_cpoe = float(week - 4) + 0.5 * qb_number
             prior_sack_rate = 0.03 + 0.002 * week
@@ -68,9 +68,11 @@ def test_walk_forward_validate_builds_expanding_folds() -> None:
     )
 
     assert [fold.test_week for fold in result.folds] == [6, 7, 8]
-    assert [fold.train_rows for fold in result.folds] == [8, 10, 12]
-    assert [fold.test_rows for fold in result.folds] == [2, 2, 2]
-    assert result.predictions.height == 6
+    assert [fold.train_rows for fold in result.folds] == [64, 80, 96]
+    assert [fold.test_rows for fold in result.folds] == [16, 16, 16]
+    assert result.predictions.height == 48
+    assert all(fold.ridge_alpha > 0 for fold in result.folds)
+    assert all(fold.ridge_inner_folds >= 2 for fold in result.folds)
     assert set(result.metrics) == set(PREDICTION_COLUMNS)
 
     for metrics in result.metrics.values():

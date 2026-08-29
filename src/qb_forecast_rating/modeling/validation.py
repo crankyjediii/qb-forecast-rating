@@ -15,6 +15,10 @@ from qb_forecast_rating.modeling.baseline import (
     score_predictions,
 )
 from qb_forecast_rating.modeling.benchmarks import PASSER_RATING_COLUMN
+from qb_forecast_rating.modeling.ridge import (
+    fit_ridge_model,
+    select_ridge_alpha,
+)
 
 DEFAULT_FIRST_TEST_WEEK = 6
 
@@ -39,6 +43,7 @@ PREDICTION_COLUMNS = {
     "prior_epa": "prior_epa_prediction",
     "passer_rating": "passer_rating_prediction",
     "linear_regression": "linear_regression_prediction",
+    "ridge_regression": "ridge_regression_prediction",
 }
 
 
@@ -49,6 +54,8 @@ class WalkForwardFold:
     test_week: int
     train_rows: int
     test_rows: int
+    ridge_alpha: float
+    ridge_inner_folds: int
 
 
 @dataclass(frozen=True)
@@ -124,6 +131,13 @@ def walk_forward_validate(
             dtype=np.float64,
         )
 
+        ridge_selection = select_ridge_alpha(train)
+        ridge_model = fit_ridge_model(
+            train,
+            ridge_selection.selected_alpha,
+        )
+        ridge_predictions = ridge_model.predict(test)
+
         passer_model = LinearRegression()
         passer_model.fit(
             train.select(PASSER_RATING_COLUMN).to_numpy(),
@@ -156,6 +170,10 @@ def walk_forward_validate(
                 league_predictions,
             ),
             pl.Series(
+                PREDICTION_COLUMNS["ridge_regression"],
+                ridge_predictions,
+            ),
+            pl.Series(
                 PREDICTION_COLUMNS["prior_epa"],
                 prior_predictions,
             ),
@@ -174,6 +192,8 @@ def walk_forward_validate(
                 test_week=test_week,
                 train_rows=train.height,
                 test_rows=test.height,
+                ridge_alpha=ridge_selection.selected_alpha,
+                ridge_inner_folds=ridge_selection.inner_folds,
             )
         )
 
