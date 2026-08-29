@@ -16,9 +16,17 @@ from qb_forecast_rating.modeling.benchmarks import (
     BenchmarkEvaluation,
     BenchmarkRun,
 )
+from qb_forecast_rating.modeling.comparison import (
+    BootstrapDifference,
+    PairedForecastComparison,
+)
 from qb_forecast_rating.modeling.inference import (
     CoefficientTest,
     InferenceEvaluation,
+)
+from qb_forecast_rating.modeling.validation import (
+    WalkForwardFold,
+    WalkForwardResult,
 )
 
 
@@ -402,3 +410,147 @@ def test_main_evaluates_baseline(
     assert "prior_sack_rate: estimate=-1.5000" in captured.out
     assert "VIF=-" in captured.out
     assert "VIF=1.60" in captured.out
+
+
+def test_parser_accepts_validate_model_command() -> None:
+    parser = build_parser()
+
+    args = parser.parse_args(["validate-model", "--season", "2024"])
+
+    assert args.command == "validate-model"
+    assert args.season == 2024
+    assert args.first_test_week == 6
+    assert args.bootstrap_replicates == 5000
+
+
+def test_main_validates_model(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    source_data = pl.DataFrame({"source": [1]})
+    prediction_data = pl.DataFrame({"prediction": [1.0]})
+    requested_paths: list[Path] = []
+    validation_calls: list[int] = []
+    comparison_calls: list[tuple[str, str, int]] = []
+
+    validation = WalkForwardResult(
+        folds=(
+            WalkForwardFold(
+                test_week=8,
+                train_rows=136,
+                test_rows=31,
+            ),
+            WalkForwardFold(
+                test_week=9,
+                train_rows=167,
+                test_rows=30,
+            ),
+        ),
+        predictions=prediction_data,
+        metrics={
+            "passer_rating": RegressionMetrics(
+                rmse=0.29,
+                mae=0.22,
+                r2=0.03,
+            ),
+            "linear_regression": RegressionMetrics(
+                rmse=0.28,
+                mae=0.21,
+                r2=0.05,
+            ),
+        },
+    )
+    comparison = PairedForecastComparison(
+        candidate_column="linear_regression_prediction",
+        reference_column="passer_rating_prediction",
+        qb_clusters=40,
+        bootstrap_replicates=100,
+        rmse=BootstrapDifference(
+            difference=-0.01,
+            confidence_low=-0.02,
+            confidence_high=0.01,
+            candidate_win_probability=0.8,
+        ),
+        mae=BootstrapDifference(
+            difference=-0.01,
+            confidence_low=-0.02,
+            confidence_high=0.01,
+            candidate_win_probability=0.75,
+        ),
+    )
+
+    def fake_read_parquet(path: Path) -> pl.DataFrame:
+        requested_paths.append(path)
+        return source_data
+
+    def fake_validate(
+        data: pl.DataFrame,
+        first_test_week: int,
+    ) -> WalkForwardResult:
+        assert data is source_data
+        validation_calls.append(first_test_week)
+        return validation
+
+    def fake_compare(
+        predictions: pl.DataFrame,
+        candidate_column: str,
+        reference_column: str,
+        bootstrap_replicates: int,
+    ) -> PairedForecastComparison:
+        assert predictions is prediction_data
+        comparison_calls.append(
+            (
+                candidate_column,
+                reference_column,
+                bootstrap_replicates,
+            )
+        )
+        return comparison
+
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.pl.read_parquet",
+        fake_read_parquet,
+    )
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.walk_forward_validate",
+        fake_validate,
+    )
+    monkeypatch.setattr(
+        "qb_forecast_rating.cli.compare_forecasts",
+        fake_compare,
+    )
+
+    exit_code = main(
+        [
+            "validate-model",
+            "--season",
+            "2024",
+            "--first-test-week",
+            "8",
+            "--bootstrap-replicates",
+            "100",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert requested_paths == [Path("data/features/qb_benchmarks_2024.parquet")]
+    assert validation_calls == [8]
+    assert comparison_calls == [
+        (
+            "linear_regression_prediction",
+            "passer_rating_prediction",
+            100,
+        )
+    ]
+    assert "Season: 2024" in captured.out
+    assert "Walk-forward validation" in captured.out
+    assert "Folds: 2" in captured.out
+    assert "First test week: 8" in captured.out
+    assert "Last test week: 9" in captured.out
+    assert "Out-of-sample rows: 1" in captured.out
+    assert "linear_regression: RMSE=0.2800" in captured.out
+    assert "Regression minus passer rating" in captured.out
+    assert "RMSE difference: -0.0100" in captured.out
+    assert "P(regression wins)=0.800" in captured.out
+    assert "Bootstrap replicates: 100" in captured.out
