@@ -3,17 +3,25 @@
 from argparse import ArgumentParser
 from collections.abc import Sequence
 from importlib.metadata import version
-from pathlib import Path
 
 import polars as pl
 
 from qb_forecast_rating.data.pbp import ingest_pbp
+from qb_forecast_rating.data.player_stats import ingest_player_stats
 from qb_forecast_rating.data.qb_actions import process_qb_actions
 from qb_forecast_rating.data.qb_games import process_qb_games
+from qb_forecast_rating.features.benchmarks import (
+    benchmark_dataset_path,
+    process_benchmark_dataset,
+)
 from qb_forecast_rating.features.forecast import process_forecast_dataset
 from qb_forecast_rating.modeling.baseline import (
     BaselineEvaluation,
     fit_baseline,
+)
+from qb_forecast_rating.modeling.benchmarks import (
+    BenchmarkEvaluation,
+    fit_passer_rating_benchmark,
 )
 from qb_forecast_rating.modeling.inference import (
     InferenceEvaluation,
@@ -46,6 +54,27 @@ def print_baseline_evaluation(evaluation: BaselineEvaluation) -> None:
         print(
             f"{name}: RMSE={metrics.rmse:.4f} MAE={metrics.mae:.4f} R2={metrics.r2:.4f}"
         )
+
+
+def print_benchmark_evaluation(
+    evaluation: BenchmarkEvaluation,
+) -> None:
+    """Print calibrated official benchmark results."""
+    metrics = evaluation.metrics
+
+    print()
+    print("Official passer-rating benchmark")
+    print(
+        f"{evaluation.name}: "
+        f"RMSE={metrics.rmse:.4f} "
+        f"MAE={metrics.mae:.4f} "
+        f"R2={metrics.r2:.4f}"
+    )
+    print(
+        "Calibration: "
+        f"EPA = {evaluation.calibration_intercept:+.4f} "
+        f"{evaluation.calibration_slope:+.6f} * rating"
+    )
 
 
 def print_inference_evaluation(evaluation: InferenceEvaluation) -> None:
@@ -91,6 +120,12 @@ def build_parser() -> ArgumentParser:
     )
     add_season_argument(ingest_parser)
 
+    player_stats_parser = subparsers.add_parser(
+        "ingest-player-stats",
+        help="Download and persist weekly player statistics.",
+    )
+    add_season_argument(player_stats_parser)
+
     actions_parser = subparsers.add_parser(
         "build-qb-actions",
         help="Build the processed quarterback dropback table.",
@@ -108,6 +143,12 @@ def build_parser() -> ArgumentParser:
         help="Build leakage-safe quarterback forecast features.",
     )
     add_season_argument(forecast_parser)
+
+    benchmark_parser = subparsers.add_parser(
+        "build-benchmark-data",
+        help="Build leakage-safe official benchmark metrics.",
+    )
+    add_season_argument(benchmark_parser)
 
     baseline_parser = subparsers.add_parser(
         "evaluate-baseline",
@@ -135,6 +176,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Saved {season} play-by-play data to {output_path}")
         return 0
 
+    if args.command == "ingest-player-stats":
+        season = int(args.season)
+        output_path = ingest_player_stats(season)
+        print(f"Saved {season} weekly player stats to {output_path}")
+        return 0
+
     if args.command == "build-qb-actions":
         season = int(args.season)
         output_path = process_qb_actions(season)
@@ -153,18 +200,29 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Saved {season} forecast data to {output_path}")
         return 0
 
+    if args.command == "build-benchmark-data":
+        season = int(args.season)
+        output_path = process_benchmark_dataset(season)
+        print(f"Saved {season} benchmark data to {output_path}")
+        return 0
+
     if args.command == "evaluate-baseline":
         season = int(args.season)
         train_end_week = int(args.train_end_week)
-        input_path = Path("data/features") / f"qb_forecast_{season}.parquet"
+        input_path = benchmark_dataset_path(season)
         data = pl.read_parquet(input_path)
 
         baseline_run = fit_baseline(data, train_end_week)
+        benchmark_run = fit_passer_rating_benchmark(
+            data,
+            train_end_week,
+        )
         inference = fit_inference(data, train_end_week)
 
         print(f"Season: {season}")
         print(f"Source: {input_path}")
         print_baseline_evaluation(baseline_run.evaluation)
+        print_benchmark_evaluation(benchmark_run.evaluation)
         print_inference_evaluation(inference)
         return 0
 
